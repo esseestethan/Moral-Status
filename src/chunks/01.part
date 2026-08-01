@@ -1,0 +1,120 @@
+  {id:'microbe',name:'Microbe (bacterium)',cat:'biological',conf:0.45,p:{sentience:0.02,consciousness:0.015,agency:0.07,cognition:0.02,relational:0.01,life:0.90,supracapacity:0.002}},
+  {id:'octopus',name:'Octopus',cat:'biological',conf:0.50,p:{sentience:0.80,consciousness:0.70,agency:0.70,cognition:0.65,relational:0.25,life:0.93,supracapacity:0.03}},
+  {id:'chimp',name:'Chimpanzee',cat:'biological',conf:0.70,p:{sentience:0.95,consciousness:0.92,agency:0.85,cognition:0.80,relational:0.80,life:0.96,supracapacity:0.04}},
+  {id:'human',name:'Paradigm human (adult)',cat:'human',conf:0.95,p:{sentience:0.99,consciousness:0.99,agency:0.97,cognition:0.97,relational:0.95,life:0.99,supracapacity:0.02}},
+];
+
+function statusFn(S,breadth,theory){
+  if(theory==='linear')return clamp01(S);
+  if(theory==='sigmoid')return 1/(1+Math.exp(-(S-0.5)*8));
+  if(theory==='threshold'){if(S<0.15)return 0.05;if(S<0.35)return 0.20;if(S<0.60)return 0.45;if(S<0.82)return 0.72;return 0.92;}
+  return clamp01(S*(0.45+0.55*breadth)); // multicriterial (Warren 1997): breadth-sensitive
+}
+const supraGate=(coreScore)=>clamp01((coreScore-0.45)/0.35); // supra-capacity only lifts a near-person
+
+// A threshold theorist denies that status comes in degrees: the vertical position marks
+// WHICH TIER an entity falls in, not how much status it has. Label the axis accordingly.
+const isThreshold=(theory)=>theory==='threshold';
+function yAxisLabel(theory){
+  return isThreshold(theory)
+    ? 'Status tier and strength of obligation'
+    : 'Degree of moral status and obligation';
+}
+function yAxisShort(theory){ return isThreshold(theory)?'Tier':'Degree'; }
+function verticalGloss(theory){
+  return isThreshold(theory)
+    ? 'Under a threshold view the vertical axis does not measure degrees. Position marks which tier an entity falls into, and vertical spread represents uncertainty about tier membership rather than an intermediate amount of moral status.'
+    : 'The vertical axis gives the resulting degree of moral status, and the obligations that follow from it.';
+}
+
+// reference curve: the full-status ceiling implied by the personhood grounds alone (no supra)
+function ceilingY(x,theory){return FULL_CAP*statusFn(x,1,theory);}
+
+function computeStats(entity,alpha,theory,n){
+  const rng=mulberry32(hashString(entity.id+'|'+theory));
+  const kappa=3+entity.conf*entity.conf*250;
+  const xs=new Array(n),ys=new Array(n);
+  const sub=Math.min(80,n),step=Math.max(1,Math.floor(n/sub));
+  const cloud=[];
+  for(let s=0;s<n;s++){
+    let X=0,Wa=0,Sn=0,Sd=0;const q=[];
+    for(const k of CORE_KEYS){
+      const m=clamp01(entity.p[k]);
+      const a=m*kappa+0.5,b=(1-m)*kappa+0.5;
+      const p=randBeta(rng,a,b);
+      const ak=alpha[k],ad=ak*DELTA[k];
+      X+=ak*p;Wa+=ak;Sn+=ad*p;Sd+=ad;q.push(ad*p);
+    }
+    const ms=clamp01(entity.p.supracapacity);
+    const pSupra=randBeta(rng,ms*kappa+0.5,(1-ms)*kappa+0.5);
+    const Xv=Wa>0?X/Wa:0, Score=Sd>0?Sn/Sd:0, br=normEntropy(q);
+    const coreScore=statusFn(Score,br,theory);
+    const Ycore=FULL_CAP*coreScore;
+    const lift=SUPRA_RANGE*alpha.supracapacity*pSupra*supraGate(coreScore);
+    const Yv=clamp01(Ycore+lift);
+    xs[s]=Xv;ys[s]=Yv;
+    if(s%step===0&&cloud.length<sub)cloud.push([Xv,Yv]);
+  }
+  const xm=mean(xs),ym=mean(ys);
+  const sxx=variance(xs,xm),syy=variance(ys,ym),sxy=covariance(xs,ys,xm,ym);
+  const sortedY=[...ys].sort((a,b)=>a-b);
+  const yLo=percentile(sortedY,2.5),yHi=percentile(sortedY,97.5);
+  let maxC=0;const contrib=ALL_GROUNDS.map(g=>{const c=alpha[g.key]*DELTA[g.key]*clamp01(entity.p[g.key]);if(c>maxC)maxC=c;return{k:g.key,c};});
+  contrib.sort((p,q)=>q.c-p.c);
+  const dominant=contrib.filter(o=>o.c>=0.25*maxC).slice(0,3).map(o=>o.k);
+  return {x:xm,y:ym,sxx,syy,sxy,yLo,yHi,cloud,dominant};
+}
+
+/* ============================== style tokens ============================== */
+const C={bg:'#FCFBF8',panel:'#FFFFFF',border:'#E5E2DA',borderSoft:'#EFEDE6',ink:'#1A1A1A',muted:'#5A5750',faint:'#8A8579',accent:'#3A3A8C'};
+// LaTeX aesthetic: Computer Modern via cm-web-fonts, with serif fallbacks.
+const SERIF=`'Computer Modern Serif','Latin Modern Roman',Georgia,'Times New Roman',serif`;
+const MONO=`'Computer Modern Typewriter','Latin Modern Mono',ui-monospace,Menlo,monospace`;
+
+/* ============================== small components ============================== */
+function Slider({label,value,onChange,min=0,max=1,step=0.01,color,hint}){
+  return (<div style={{marginBottom:9}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:8}}>
+      <span style={{fontSize:13,color:C.ink}}>{label}</span>
+      <span style={{fontFamily:MONO,fontSize:12,color:C.muted}}>{value.toFixed(2)}</span>
+    </div>
+    <input type="range" min={min} max={max} step={step} value={value}
+      onChange={e=>onChange(parseFloat(e.target.value))}
+      style={{width:'100%',accentColor:color||C.accent,cursor:'pointer'}}/>
+    {hint&&<div style={{fontSize:11,color:C.faint,marginTop:1,lineHeight:1.35}}>{hint}</div>}
+  </div>);
+}
+function Eyebrow({children,style}){
+  return <div style={{fontFamily:MONO,fontSize:11,letterSpacing:'0.10em',textTransform:'uppercase',color:C.faint,marginBottom:8,...style}}>{children}</div>;
+}
+function Panel({children,style}){
+  return <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:6,padding:16,...style}}>{children}</div>;
+}
+
+/* ============================== map plot ============================== */
+function MapPlot({entities,statsMap,theory,selected,onSelect,showClouds,showEllipses,showCurve}){
+  const VBW=760,VBH=540,L=70,R=26,T=22,B=58;
+  const plotW=VBW-L-R,plotH=VBH-T-B;
+  const mapX=(x)=>L+x*plotW, mapY=(y)=>T+(1-y)*plotH;
+  let curve='';for(let i=0;i<=50;i++){const xx=i/50,yy=ceilingY(xx,theory);curve+=(i===0?'M':'L')+mapX(xx).toFixed(1)+' '+mapY(yy).toFixed(1)+' ';}
+  const selStat=selected?statsMap[selected]:null;
+  const selCol=selStat?CAT_COLORS[entities.find(e=>e.id===selected).cat]:C.accent;
+  return (
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} style={{width:'100%',height:'auto',display:'block',userSelect:'none'}}>
+      {TIERS.map((t)=>{const y0=mapY(Math.min(t.hi,1)),y1=mapY(t.lo);return(
+        <g key={t.short}>
+          <rect x={L} y={y0} width={plotW} height={y1-y0} fill={t.fill}/>
+          <text x={L+8} y={(y0+y1)/2+3} fontFamily={MONO} fontSize={10.5} fill={C.muted} opacity={0.85}>{t.long}</text>
+        </g>);})}
+      {[0,0.25,0.5,0.75,1].map(gx=>(
+        <line key={'gx'+gx} x1={mapX(gx)} y1={T} x2={mapX(gx)} y2={T+plotH} stroke={C.borderSoft} strokeWidth={1}/>
+      ))}
+      <rect x={L} y={T} width={plotW} height={plotH} fill="none" stroke={C.border} strokeWidth={1}/>
+      <line x1={L} y1={mapY(0.85)} x2={L+plotW} y2={mapY(0.85)} stroke="#7C3AED" strokeWidth={1} strokeDasharray="4 3" opacity={0.5}/>
+      <text x={L+plotW-4} y={mapY(0.85)-5} fontFamily={MONO} fontSize={9.5} fill="#7C3AED" textAnchor="end" opacity={0.85}>more-than-full above</text>
+      {showCurve&&<path d={curve} fill="none" stroke={C.ink} strokeWidth={1.6} strokeDasharray="2 3" opacity={0.55}/>}
+      {showCurve&&<text x={mapX(0.5)} y={mapY(ceilingY(0.5,theory))-6} fontFamily={MONO} fontSize={9.5} fill={C.ink} opacity={0.6} textAnchor="middle">personhood ceiling (full)</text>}
+      {selStat&&<g>
+        <line x1={mapX(selStat.x)} y1={T} x2={mapX(selStat.x)} y2={T+plotH} stroke={selCol} strokeWidth={1} strokeDasharray="3 3" opacity={0.45}/>
+        <line x1={L} y1={mapY(selStat.y)} x2={L+plotW} y2={mapY(selStat.y)} stroke={selCol} strokeWidth={1} strokeDasharray="3 3" opacity={0.45}/>
+        <line x1={L} y1={mapY(selStat.yHi)} x2={L+plotW} y2={mapY(selStat.yHi)} stroke={selCol} strokeWidth={1} strokeDasharray="1 4" opacity={0.5}/>
