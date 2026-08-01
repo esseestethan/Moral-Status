@@ -1,0 +1,120 @@
+
+  const selStat=selected?statsMap[selected]:null;
+  const selEntity=selected?entities.find(e=>e.id===selected):null;
+  const ob=selEntity?obligationsFor(selStat,precaution):null;
+  const ranked=[...visEntities].sort((a,b)=>statsMap[b.id].y-statsMap[a.id].y);
+
+  const btn=(active)=>({fontFamily:SERIF,fontSize:13.5,padding:'6px 13px',borderRadius:4,cursor:'pointer',border:`1px solid ${active?C.accent:C.border}`,background:active?C.accent:'#fff',color:active?'#fff':C.ink,transition:'all .12s'});
+  const chip=(col)=>({fontFamily:MONO,fontSize:11,padding:'2px 8px',borderRadius:3,background:col+'18',color:col,border:`1px solid ${col}44`});
+
+  return(
+    <div style={{fontFamily:SERIF,color:C.ink,background:C.bg,padding:'22px 20px 30px',minHeight:'100%'}}>
+      <div style={{maxWidth:1280,margin:'0 auto'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:16,flexWrap:'wrap',marginBottom:6}}>
+          <div>
+            <Eyebrow>Created by Ethan C. Terrill in collaboration with Claude Opus 4.8.</Eyebrow>
+            <h1 style={{margin:0,fontSize:28,fontWeight:700,letterSpacing:'-0.01em'}}>Stranger (Entities) in a Strange World: Mapping Moral Status</h1>
+            <p style={{margin:'8px 0 0',fontSize:14.5,color:C.muted,maxWidth:800,lineHeight:1.55}}>
+              Each candidate entity is represented as a probability cloud rather than a fixed point, because the evidence about these systems is incomplete. The horizontal axis aggregates how strongly an entity satisfies the grounds that plausibly confer moral status, weighted by one&apos;s credence that each ground matters. {' '}{verticalGloss(theory)}{' '} Six moral status grounds can (plausibly) carry an entity up to full moral status; a seventh, supra-personal capacity, is what can raise a being into supra, or more-than-full, moral status, reserved for post-persons and advanced AI. Paradigm humans cap at full moral status, and only entities whose capacities exceed the personhood ceiling rise above it.
+            </p>
+          </div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <button style={btn(view==='map')} onClick={()=>setView('map')}>Map</button>
+            <button style={btn(view==='pairs')} onClick={()=>setView('pairs')}>Pairwise</button>
+            <button style={{...btn(showHelp),fontSize:13.5}} onClick={()=>setShowHelp(h=>!h)}>{showHelp?'Hide notes':'Reading the map'}</button>
+          </div>
+        </div>
+
+        {showHelp&&<Panel style={{marginTop:10,background:'#FDFCFA'}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:18,fontSize:13,lineHeight:1.55,color:C.ink}}>
+            <div><b style={{color:C.accent}}>The two axes.</b> Horizontal, x-axis: the credence-weighted breadth of the six moral status grounds an entity satisfies, where each ground carries an empirical probability. Vertical, y-axis: the degree of moral status, and thus the strength of obligation, that those grounds imply. The dashed curve marks the full moral status ceiling reachable on personhood grounds alone.</div>
+            <div><b style={{color:'#7C3AED'}}>Supra, or more-than-full.</b> A seventh ground, supra-personal capacity (Douglas&apos;s &quot;Capacity G&quot;), can raise an entity above the ceiling into supra moral status. Paradigm adult humans sit at full moral status because their supra-capacity is near zero; post-persons and advanced AI may rise above them.</div>
+            <div><b style={{color:'#7C3AED'}}>The threshold debate.</b> The supra-capacity credence slider operationalizes an open dispute. Set it to zero for the view that full moral status is the ceiling (Buchanan&apos;s view, on which nothing exceeds personhood); raise it for the weaker-threshold views on which more-than-full moral status is possible (see Agar and Douglas).</div>
+            <div><b style={{color:C.accent}}>The probabilistic layer.</b> Each draw samples every ground from a Beta distribution whose spread reflects the confidence placed in that entity&apos;s profile. The cloud is the set of draws; the ellipse is its 95% credible region. Selecting an entity lists the obligations that follow from its degree and its dominant grounds. Precautionary mode reads obligations off the 95% upper bound rather than the mean.</div>
+          </div>
+        </Panel>}
+
+        <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr)',gap:14,marginTop:14}} className="msm-grid">
+          <style>{`@media(min-width:1060px){.msm-grid{grid-template-columns:302px minmax(0,1fr) 322px !important;}}`}</style>
+
+          {/* LEFT */}
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            <Panel>
+              <Eyebrow>Meta-theory of moral status</Eyebrow>
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {THEORIES.map(t=>(
+                  <button key={t.k} onClick={()=>setTheory(t.k)} style={{textAlign:'left',padding:'8px 10px',borderRadius:5,cursor:'pointer',border:`1px solid ${theory===t.k?C.accent:C.border}`,background:theory===t.k?'#EEEEF7':'#fff'}}>
+                    <div style={{fontSize:13.5,fontWeight:700,color:theory===t.k?C.accent:C.ink}}>{t.name}</div>
+                    <div style={{fontSize:11.5,color:C.muted,marginTop:2,lineHeight:1.35}}>{t.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel>
+              <Eyebrow>Moral status grounds: credence</Eyebrow>
+              <div style={{fontSize:11.5,color:C.faint,marginTop:-4,marginBottom:10,lineHeight:1.4}}>Your credence that each property confers moral status. This is the point of moral uncertainty.</div>
+              {CORE_GROUNDS.map(g=>(<Slider key={g.key} label={g.label} value={alpha[g.key]} color={C.accent} onChange={v=>setAlpha(a=>({...a,[g.key]:v}))}/>))}
+              <div style={{borderTop:`1px solid ${C.borderSoft}`,margin:'10px 0',paddingTop:10}}>
+                <Eyebrow style={{color:'#7C3AED'}}>More-than-full (supra)</Eyebrow>
+                <Slider label={SUPRA.label} value={alpha.supracapacity} color={'#7C3AED'} onChange={v=>setAlpha(a=>({...a,supracapacity:v}))}
+                  hint="Credence that capacities beyond the human range confer supra moral status. Zero recovers the view that full is the ceiling (Buchanan); higher values open the weaker-threshold views (see Terrill 2022)."/>
+              </div>
+            </Panel>
+
+            <Panel>
+              <Eyebrow>Display</Eyebrow>
+              {[['Credible-region ellipses',showEllipses,setShowEllipses],['Posterior point cloud',showClouds,setShowClouds],['Personhood-ceiling curve',showCurve,setShowCurve],['Precautionary mode (act on the 95% upper bound)',precaution,setPrecaution]].map(([lab,val,set])=>(
+                <label key={lab} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,marginBottom:7,cursor:'pointer'}}>
+                  <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} style={{accentColor:C.accent,width:15,height:15}}/>
+                  <span>{lab}</span>
+                </label>
+              ))}
+              <Slider label="Monte-Carlo draws" value={nSamples} min={60} max={600} step={20} onChange={setNSamples} hint="More draws give smoother clouds, at some cost in speed."/>
+            </Panel>
+
+            <Panel>
+              <button onClick={()=>setShowRefs(r=>!r)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',width:'100%',background:'none',border:'none',cursor:'pointer',padding:0}}>
+                <Eyebrow style={{marginBottom:0}}>Sources and basis</Eyebrow>
+                <span style={{fontFamily:MONO,fontSize:14,color:C.faint}}>{showRefs?'\u2212':'+'}</span>
+              </button>
+              {showRefs&&<div style={{marginTop:12}}>
+                {REFERENCES.map((grp,gi)=>(
+                  <div key={gi} style={{marginBottom:gi<REFERENCES.length-1?12:0}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.ink,marginBottom:5}}>{grp.group}</div>
+                    {grp.items.map((it,ii)=>(<div key={ii} style={{fontSize:11.3,color:C.muted,lineHeight:1.5,marginBottom:5,paddingLeft:12,textIndent:-12}}>{it}</div>))}
+                  </div>
+                ))}
+                <div style={{fontSize:11,color:C.faint,marginTop:6,lineHeight:1.45,borderTop:`1px solid ${C.borderSoft}`,paddingTop:8}}>The tool operationalizes these positions but does not adjudicate between them. Theories of consciousness (e.g., global workspace, higher-order, integrated information, and others) enter upstream, informing the sentience and consciousness credences, rather than forming separate axes. Some views make moral status contingent (Harman) or partly relational; the point-estimate profiles simplify these.</div>
+              </div>}
+            </Panel>
+          </div>
+
+          {/* CENTER */}
+          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+            <Panel style={{padding:14}}>
+              {view==='map'
+                ? <MapPlot entities={visEntities} statsMap={statsMap} theory={theory} selected={selected} onSelect={setSelected} showClouds={showClouds} showEllipses={showEllipses} showCurve={showCurve}/>
+                : <PairsPlot entities={visEntities} statsMap={statsMap} selected={selected} onSelect={setSelected} theory={theory}/>}
+              <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'center',marginTop:10,paddingTop:10,borderTop:`1px solid ${C.borderSoft}`}}>
+                {Object.keys(CAT_LABEL).map(cat=>(
+                  <label key={cat} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,cursor:'pointer',opacity:visCats[cat]?1:0.45}}>
+                    <input type="checkbox" checked={visCats[cat]} onChange={e=>setVisCats(v=>({...v,[cat]:e.target.checked}))} style={{accentColor:CAT_COLORS[cat],width:14,height:14}}/>
+                    <span style={{width:11,height:11,borderRadius:2,background:CAT_COLORS[cat],display:'inline-block'}}/>
+                    <span style={{color:C.ink}}>{CAT_LABEL[cat]}</span>
+                  </label>
+                ))}
+                <span style={{fontSize:11,color:C.faint,marginLeft:'auto',fontFamily:MONO}}>ellipse: 95% credible region. Click an entity to inspect.</span>
+              </div>
+            </Panel>
+
+            <Panel>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,gap:10,flexWrap:'wrap'}}>
+                <Eyebrow style={{marginBottom:0}}>Entity profile: empirical uncertainty</Eyebrow>
+                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  <select value={editId} onChange={e=>setEditId(e.target.value)} style={{fontFamily:SERIF,fontSize:13,padding:'5px 8px',borderRadius:4,border:`1px solid ${C.border}`,background:'#fff',color:C.ink}}>
+                    {entities.map(e=>(<option key={e.id} value={e.id}>{e.name}</option>))}
+                  </select>
+                  <button onClick={addEntity} style={{...btn(false),padding:'5px 10px'}}>Add</button>
+                </div>
+              </div>
