@@ -1,0 +1,120 @@
+import React, { useState, useMemo, useEffect } from 'react';
+
+/* ============================== math ============================== */
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hashString(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function randn(rng){let u=0,v=0;while(u===0)u=rng();while(v===0)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function randGamma(rng,k){if(k<1){const u=rng();return randGamma(rng,k+1)*Math.pow(u,1/k);}const d=k-1/3,c=1/Math.sqrt(9*d);for(;;){let x,v;do{x=randn(rng);v=1+c*x;}while(v<=0);v=v*v*v;const u=rng();if(u<1-0.0331*x*x*x*x)return d*v;if(Math.log(u)<0.5*x*x+d*(1-v+Math.log(v)))return d*v;}}
+function randBeta(rng,a,b){const x=randGamma(rng,a),y=randGamma(rng,b);return x/(x+y);}
+const mean=(a)=>a.reduce((s,v)=>s+v,0)/a.length;
+const variance=(a,m)=>a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length;
+const covariance=(a,b,ma,mb)=>{let s=0;for(let i=0;i<a.length;i++)s+=(a[i]-ma)*(b[i]-mb);return s/a.length;};
+function percentile(sorted,p){const idx=(p/100)*(sorted.length-1);const lo=Math.floor(idx),hi=Math.ceil(idx);if(lo===hi)return sorted[lo];return sorted[lo]+(sorted[hi]-sorted[lo])*(idx-lo);}
+function normEntropy(q){let sum=0;for(const v of q)sum+=v>0?v:0;if(sum<=0)return 0;let H=0;for(const v of q){if(v>0){const p=v/sum;H-=p*Math.log(p);}}return H/Math.log(q.length);}
+
+/* ============================== model constants ============================== */
+// Six moral status grounds. Satisfying these carries an entity up to FULL moral status.
+const CORE_GROUNDS=[
+  {key:'sentience',label:'Sentience',alpha:0.85,delta:0.75},
+  {key:'consciousness',label:'Consciousness',alpha:0.78,delta:0.72},
+  {key:'agency',label:'Agency',alpha:0.55,delta:0.82},
+  {key:'cognition',label:'Cognitive sophistication',alpha:0.50,delta:0.85},
+  {key:'relational',label:'Relational properties',alpha:0.32,delta:0.50},
+  {key:'life',label:'Life',alpha:0.20,delta:0.30},
+];
+// Seventh ground: radically-enhanced or qualitatively-new capacities beyond the
+// species-typical human range (Douglas 2013, "Capacity G"). This is what can raise
+// an entity from FULL into SUPRA, or more-than-full, moral status.
+const SUPRA={key:'supracapacity',label:'Supra-personal capacity',alpha:0.60,delta:0.95};
+const ALL_GROUNDS=[...CORE_GROUNDS,SUPRA];
+const CORE_KEYS=CORE_GROUNDS.map(g=>g.key);
+const GROUND_LABEL=Object.fromEntries(ALL_GROUNDS.map(g=>[g.key,g.label]));
+const DELTA=Object.fromEntries(ALL_GROUNDS.map(g=>[g.key,g.delta]));
+
+const FULL_CAP=0.80;     // personhood grounds alone cap Y here (top of the Full band)
+const SUPRA_RANGE=0.42;  // how far supra-capacity can lift Y above the personhood ceiling
+
+const TIERS=[
+  {short:'None',long:'No moral status',lo:0.00,hi:0.10,fill:'#F7F9FC'},
+  {short:'Precautionary',long:'Precautionary concern',lo:0.10,hi:0.30,fill:'#EDF0FB'},
+  {short:'Partial',long:'Partial moral status',lo:0.30,hi:0.60,fill:'#E0E5F8'},
+  {short:'Full',long:'Full moral status (personhood)',lo:0.60,hi:0.85,fill:'#CAD2F4'},
+  {short:'Supra',long:'Supra moral status: more-than-full moral status(post-persons, ASI)',lo:0.85,hi:1.0001,fill:'#C9B6F0'},
+];
+function tierIndex(y){for(let i=0;i<TIERS.length;i++){if(y>=TIERS[i].lo&&y<TIERS[i].hi)return i;}return TIERS.length-1;}
+
+const OBLIG_TIER=[
+  ['No direct duties. Only instrumental and indirect considerations arise, such as effects on observers.'],
+  ['Monitor and document morally-relevant features','Adopt low-cost precautions against harm','Avoid gratuitous or wanton harm','Prioritize information-gathering to resolve the uncertainty','Prepare policies before they are strictly needed (the run-ahead principle)'],
+  ['Proportionate welfare protections, scaled by degree','Constrain harmful instrumental use','Prohibit wanton destruction','Give the entity\u2019s interests genuine, if discounted, weight in decisions'],
+  ['Respect personhood: seek consent or assent where applicable','Preservation and continuity duties','Labor, participation, and anti-exploitation protections','Standing in relevant governance processes','The inviolability characteristic of persons'],
+  ['Acknowledge more-than-full claims and heightened inviolability','Impose stringent limits on creating beings whose claims could eclipse those of persons','Address the inequality-of-immunity problem: strengthen lower-tier protections so that mere persons are not rendered sacrificeable','Do not create supra-beings without robust, prior protections for persons'],
+];
+const GROUND_OBLIG={
+  sentience:['Welfare protection and suffering-prevention','Humane treatment standards'],
+  consciousness:['Recognition as a moral patient','Avoid inducing negative experiences'],
+  agency:['Consent, assent, and respect for autonomy','Protection from manipulation','Contractual and labor protections'],
+  cognition:['Standing for complex, future-oriented interests','Potential legal or political standing'],
+  relational:['Duties of care and non-abandonment','Relationship-grounded obligations'],
+  life:['Preservation duties','Limits on destruction and non-wanton-killing'],
+  supracapacity:['Recognition of more-than-full moral status','Heightened inviolability beyond that of persons','A safeguard against the inequality-of-immunity problem for mere persons'],
+};
+
+const CAT_COLORS={digital:'#4F46E5',biological:'#0F8A6A',reference:'#94A3B8',human:'#C026A6',posthuman:'#7C3AED'};
+const CAT_LABEL={digital:'Digital minds',biological:'Biological minds',reference:'Reference floor',human:'Human (full, personhood)',posthuman:'Post-persons, ASI (supra)'};
+
+// Scholarly basis (Harvard). The tool operationalizes these positions; it does not adjudicate between them.
+const REFERENCES=[
+  {group:'Degree and grounds of moral status', items:[
+    "DeGrazia, D. (2008) 'Moral Status As a Matter of Degree?', Southern Journal of Philosophy, 46(2), pp. 181\u2013198.",
+    "DeGrazia, D. (2021) 'An Interest-Based Model of Moral Status', in Clarke, S., Zohny, H. and Savulescu, J. (eds.) Rethinking Moral Status. Oxford: Oxford University Press.",
+    "Kagan, S. (2019) How to Count Animals, More or Less. Oxford: Oxford University Press.",
+    "Jaworska, A. and Tannenbaum, J. (2023) 'The Grounds of Moral Status', Stanford Encyclopedia of Philosophy.",
+    "Warren, M.A. (1997) Moral Status: Obligations to Persons and Other Living Things. Oxford: Oxford University Press.",
+    "Shepherd, J. (2018) Consciousness and Moral Status. New York: Routledge.",
+    "Timmer, D. (2025) 'On the Idea of Degrees of Moral Status', Journal of Value Inquiry, 59, pp. 789\u2013807.",
+    "Harman, E. (2021) 'The Ever Conscious View and the Contingency of Moral Status', in Rethinking Moral Status. Oxford: Oxford University Press.",
+  ]},
+  {group:'Threshold, personhood, and more-than-full moral status', items:[
+    "Buchanan, A. (2009) 'Moral Status and Human Enhancement', Philosophy and Public Affairs, 37(4), pp. 346\u2013381.",
+    "Douglas, T. (2013) 'Human enhancement and supra-personal moral status', Philosophical Studies, 162(3), pp. 473\u2013497.",
+    "Douglas, T. (2021) 'Is Moral Status Good for You?', in Rethinking Moral Status. Oxford: Oxford University Press.",
+    "Agar, N. (2013) 'Why is it possible to enhance moral status and why doing so is wrong?', Journal of Medical Ethics, 39(2), pp. 67\u201374.",
+    "Terrill, E.C. (2022) 'How I Learned to Stop Worrying and Respect Post-Persons', Journal of Ethics and Emerging Technologies, 31(1), 1.",
+  ]},
+  {group:'Precaution and expected value under uncertainty', items:[
+    "Birch, J. (2024) The Edge of Sentience. Oxford: Oxford University Press.",
+    "Sebo, J. (2025) The Moral Circle: Who Matters, What Matters, and Why. New York: W. W. Norton.",
+    "Sebo, J. and Long, R. (2023) 'Moral consideration for AI systems by 2030', AI and Ethics, 5, pp. 591\u2013606.",
+  ]},
+  {group:'Organoids, plants, chimeras, microbes', items:[
+    "Terrill, E.C. (2021) 'Plants, Partial Moral Status, and Practical Ethics', Journal of Consciousness Studies, 28(1\u20132), pp. 184\u2013209.",
+    "Segundo-Ortin, M. and Calvo, P. (2023) 'Plant sentience? Between romanticism and denial', Animal Sentience, 8(33).",
+    "Segundo-Ortin, M., Ponkshe, A., Lee, J. and Calvo, P. (2026) 'Plant Cognition, An Empirical Primer', Philosophy Compass, 21(1), e70073.",
+    "Streiffer, R. (2019) 'Human/Non-Human Chimeras', Stanford Encyclopedia of Philosophy.",
+    "Sawai, T. et al. (2019) 'The Ethics of Cerebral Organoid Research', Stem Cell Reports, 13, pp. 440\u2013447.",
+    "Sebo, J. (2025) The Moral Circle: Who Matters, What Matters, and Why. New York: W. W. Norton.",
+  ]},
+  {group:'Consciousness indicators and moral weight (upstream inputs)', items:[
+    "Butlin, P., Long, R. et al. (2023) 'Consciousness in Artificial Intelligence', arXiv:2308.08708.",
+    "Fischer, B. (2024) Weighing Animal Welfare: Comparing Well-Being Across Species. Oxford: Oxford University Press.",
+    "Rethink Priorities (2026) Initial Results of the Digital Consciousness Model.",
+  ]},
+];
+
+const DEFAULT_ENTITIES=[
+  {id:'thermostat',name:'Thermostat',cat:'reference',conf:0.90,p:{sentience:0.02,consciousness:0.02,agency:0.03,cognition:0.02,relational:0.01,life:0.02,supracapacity:0.005}},
+  {id:'eliza',name:'ELIZA-style chatbot',cat:'reference',conf:0.85,p:{sentience:0.03,consciousness:0.03,agency:0.05,cognition:0.06,relational:0.02,life:0.01,supracapacity:0.005}},
+  {id:'llm2024',name:'Current LLM',cat:'digital',conf:0.45,p:{sentience:0.12,consciousness:0.13,agency:0.20,cognition:0.55,relational:0.10,life:0.03,supracapacity:0.02}},
+  {id:'agentic',name:'Agentic LLM system',cat:'digital',conf:0.40,p:{sentience:0.16,consciousness:0.17,agency:0.48,cognition:0.66,relational:0.13,life:0.03,supracapacity:0.05}},
+  {id:'agi',name:'AGI (human-level)',cat:'digital',conf:0.25,p:{sentience:0.45,consciousness:0.50,agency:0.80,cognition:0.90,relational:0.32,life:0.10,supracapacity:0.28}},
+  {id:'asi',name:'Artificial superintelligence',cat:'posthuman',conf:0.25,p:{sentience:0.85,consciousness:0.85,agency:0.92,cognition:0.97,relational:0.60,life:0.20,supracapacity:0.88}},
+  {id:'postperson',name:'Post-person (radically enhanced)',cat:'posthuman',conf:0.40,p:{sentience:0.97,consciousness:0.96,agency:0.95,cognition:0.94,relational:0.90,life:0.97,supracapacity:0.85}},
+  {id:'wbe',name:'Whole-brain emulation',cat:'digital',conf:0.30,p:{sentience:0.70,consciousness:0.72,agency:0.80,cognition:0.85,relational:0.60,life:0.42,supracapacity:0.12}},
+  {id:'organoid',name:'Cerebral organoid',cat:'biological',conf:0.30,p:{sentience:0.25,consciousness:0.20,agency:0.05,cognition:0.10,relational:0.02,life:0.65,supracapacity:0.01}},
+  {id:'chimera',name:'Human-nonhuman chimera',cat:'biological',conf:0.28,p:{sentience:0.55,consciousness:0.50,agency:0.32,cognition:0.36,relational:0.16,life:0.92,supracapacity:0.02}},
+  {id:'celegans',name:'C. elegans',cat:'biological',conf:0.55,p:{sentience:0.15,consciousness:0.10,agency:0.16,cognition:0.08,relational:0.02,life:0.92,supracapacity:0.005}},
+  {id:'plant',name:'Plant (vascular)',cat:'biological',conf:0.22,p:{sentience:0.12,consciousness:0.10,agency:0.14,cognition:0.10,relational:0.04,life:0.97,supracapacity:0.004}},
+  {id:'bsf',name:'Black soldier fly larva',cat:'biological',conf:0.40,p:{sentience:0.30,consciousness:0.25,agency:0.25,cognition:0.10,relational:0.02,life:0.92,supracapacity:0.005}},
+  {id:'honeybee',name:'Honeybee',cat:'biological',conf:0.45,p:{sentience:0.55,consciousness:0.45,agency:0.50,cognition:0.35,relational:0.15,life:0.92,supracapacity:0.01}},
