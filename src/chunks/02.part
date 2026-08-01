@@ -1,0 +1,120 @@
+        <text x={L+plotW-4} y={mapY(selStat.yHi)-4} fontFamily={MONO} fontSize={9} fill={selCol} textAnchor="end" opacity={0.75}>95% upper</text>
+      </g>}
+      {showClouds&&entities.map(e=>{const st=statsMap[e.id];const col=CAT_COLORS[e.cat];const dim=selected&&selected!==e.id;return(
+        <g key={'c'+e.id} opacity={dim?0.35:1}>{st.cloud.map((pt,i)=>(
+          <circle key={i} cx={mapX(pt[0])} cy={mapY(pt[1])} r={1.5} fill={col} opacity={0.16}/>
+        ))}</g>);})}
+      {showEllipses&&entities.map(e=>{
+        const st=statsMap[e.id];const col=CAT_COLORS[e.cat];const sel=selected===e.id;const dim=selected&&!sel;
+        const sx=plotW,sy=plotH;
+        const A=sx*sx*st.sxx,Bc=-sx*sy*st.sxy,Cc=sy*sy*st.syy;
+        const tr=A+Cc,det=A*Cc-Bc*Bc;const disc=Math.sqrt(Math.max(0,tr*tr/4-det));
+        let l1=Math.max(tr/2+disc,1),l2=Math.max(tr/2-disc,1);
+        const ang=Math.atan2(l1-A,Bc)*180/Math.PI;const k=2.448;
+        const rx=k*Math.sqrt(l1),ry=k*Math.sqrt(l2);
+        const cx=mapX(st.x),cy=mapY(st.y);
+        return(<ellipse key={'e'+e.id} cx={cx} cy={cy} rx={rx} ry={ry}
+          transform={`rotate(${ang} ${cx} ${cy})`}
+          fill={col} fillOpacity={sel?0.16:0.07} stroke={col} strokeOpacity={dim?0.3:(sel?0.95:0.55)} strokeWidth={sel?1.8:0.9}/>);
+      })}
+      {entities.map(e=>{const st=statsMap[e.id];const col=CAT_COLORS[e.cat];const sel=selected===e.id;const dim=selected&&!sel;
+        const cx=mapX(st.x),cy=mapY(st.y);const right=st.x<0.84;
+        return(<g key={'p'+e.id} opacity={dim?0.4:1} style={{cursor:'pointer'}} onClick={()=>onSelect(sel?null:e.id)}>
+          {sel&&<circle cx={cx} cy={cy} r={9} fill="none" stroke={col} strokeWidth={1.2} opacity={0.5}/>}
+          <circle cx={cx} cy={cy} r={sel?6:4.5} fill={col} stroke="#fff" strokeWidth={1.4}/>
+          <text x={right?cx+8:cx-8} y={cy+3.5} textAnchor={right?'start':'end'} fontFamily={MONO} fontSize={10.5} fill={C.ink} fontWeight={sel?700:400}>{e.name}</text>
+        </g>);})}
+      {[0,0.25,0.5,0.75,1].map(gx=>(<text key={'tx'+gx} x={mapX(gx)} y={T+plotH+16} textAnchor="middle" fontFamily={MONO} fontSize={9.5} fill={C.muted}>{gx.toFixed(2)}</text>))}
+      {isThreshold(theory)&&<text x={L+plotW} y={T+plotH+31} textAnchor="end" fontFamily={MONO} fontSize={9} fontStyle="italic" fill={C.muted}>threshold view: vertical position marks tier membership, not amount of status</text>}
+      <text x={L+plotW/2} y={VBH-6} textAnchor="middle" fontFamily={SERIF} fontSize={12.5} fontStyle="italic" fill={C.ink}>Moral status grounds satisfaction (credence-weighted breadth)</text>
+      <text transform={`rotate(-90 16 ${T+plotH/2})`} x={16} y={T+plotH/2} textAnchor="middle" fontFamily={SERIF} fontSize={12.5} fontStyle="italic" fill={C.ink}>{yAxisLabel(theory)}</text>
+    </svg>
+  );
+}
+
+/* ============================== pairs (SPLOM) plot ============================== */
+function PairsPlot({entities,statsMap,selected,onSelect,theory}){
+  const VARS=[
+    {key:'sentience',label:'Sentience',get:(e)=>e.p.sentience},
+    {key:'agency',label:'Agency',get:(e)=>e.p.agency},
+    {key:'cognition',label:'Cognition',get:(e)=>e.p.cognition},
+    {key:'supra',label:'Supra-cap.',get:(e)=>e.p.supracapacity},
+    {key:'degree',label:yAxisShort(theory),get:(e)=>statsMap[e.id].y},
+  ];
+  const n=VARS.length;const VBW=680,VBH=660,L=74,Tp=18,Rr=14,Bb=46;
+  const gW=VBW-L-Rr,gH=VBH-Tp-Bb;const cW=gW/n,cH=gH/n;const pad=9;
+  return(
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} style={{width:'100%',height:'auto',display:'block',userSelect:'none'}}>
+      {VARS.map((vr,r)=>VARS.map((vc,c)=>{
+        const x0=L+c*cW,y0=Tp+r*cH;
+        const sx=(v)=>x0+pad+v*(cW-2*pad);
+        const sy=(v)=>y0+cH-pad-v*(cH-2*pad);
+        return(<g key={r+'-'+c}>
+          <rect x={x0} y={y0} width={cW} height={cH} fill={(r+c)%2===0?'#FDFCFA':'#F7F5F0'} stroke={C.borderSoft} strokeWidth={1}/>
+          {r===c
+            ? <text x={x0+cW/2} y={y0+cH/2+4} textAnchor="middle" fontFamily={SERIF} fontSize={12.5} fontStyle="italic" fill={C.ink}>{vr.label}</text>
+            : entities.map(e=>{const sel=selected===e.id;const dim=selected&&!sel;return(
+                <circle key={e.id} cx={sx(clamp01(vc.get(e)))} cy={sy(clamp01(vr.get(e)))} r={sel?4:2.7}
+                  fill={CAT_COLORS[e.cat]} stroke="#fff" strokeWidth={sel?1.1:0.5} opacity={dim?0.35:0.9}
+                  style={{cursor:'pointer'}} onClick={()=>onSelect(sel?null:e.id)}><title>{e.name}</title></circle>);})}
+        </g>);
+      }))}
+      {VARS.map((vr,r)=>(<text key={'rl'+r} transform={`rotate(-90 ${L-46} ${Tp+r*cH+cH/2})`} x={L-46} y={Tp+r*cH+cH/2} textAnchor="middle" fontFamily={MONO} fontSize={9.5} fill={C.muted}>{vr.label}</text>))}
+      {VARS.map((vc,c)=>(<text key={'cl'+c} x={L+c*cW+cW/2} y={VBH-24} textAnchor="middle" fontFamily={MONO} fontSize={9.5} fill={C.muted}>{vc.label}</text>))}
+      <text x={L+gW/2} y={VBH-6} textAnchor="middle" fontFamily={SERIF} fontSize={12} fontStyle="italic" fill={C.ink}>Pairwise relationships (an analogue of R&apos;s plot(data.frame))</text>
+    </svg>
+  );
+}
+
+/* ============================== obligations ============================== */
+function obligationsFor(stat,precaution){
+  const opIdx=precaution?tierIndex(stat.yHi):tierIndex(stat.y);
+  let duties=[];
+  if(opIdx===0)duties=OBLIG_TIER[0].slice();
+  else for(let i=1;i<=opIdx;i++)duties=duties.concat(OBLIG_TIER[i]);
+  const groundDuties=[];const seen=new Set();
+  for(const g of stat.dominant)for(const d of (GROUND_OBLIG[g]||[]))if(!seen.has(d)){seen.add(d);groundDuties.push(d);}
+  return {opIdx,duties,groundDuties};
+}
+
+/* ============================== main ============================== */
+export default function MoralStatusMap(){
+  useEffect(()=>{const l=document.createElement('link');l.rel='stylesheet';l.href='https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css';document.head.appendChild(l);return()=>{try{document.head.removeChild(l);}catch(e){}};},[]);
+
+  const [theory,setTheory]=useState('linear');
+  const [alpha,setAlpha]=useState(Object.fromEntries(ALL_GROUNDS.map(g=>[g.key,g.alpha])));
+  const [entities,setEntities]=useState(DEFAULT_ENTITIES);
+  const [selected,setSelected]=useState(null);
+  const [view,setView]=useState('map');
+  const [showClouds,setShowClouds]=useState(false);
+  const [showEllipses,setShowEllipses]=useState(true);
+  const [showCurve,setShowCurve]=useState(true);
+  const [precaution,setPrecaution]=useState(false);
+  const [nSamples,setNSamples]=useState(220);
+  const [visCats,setVisCats]=useState({digital:true,biological:true,reference:true,human:true,posthuman:true});
+  const [editId,setEditId]=useState('chimera');
+  const [showHelp,setShowHelp]=useState(false);
+  const [showRefs,setShowRefs]=useState(false);
+  const [cfg,setCfg]=useState('');
+  const [cfgErr,setCfgErr]=useState('');
+
+  const statsMap=useMemo(()=>{const m={};for(const e of entities)m[e.id]=computeStats(e,alpha,theory,nSamples);return m;},[entities,alpha,theory,nSamples]);
+  const visEntities=entities.filter(e=>visCats[e.cat]);
+  const editEntity=entities.find(e=>e.id===editId)||entities[0];
+
+  const setEntityP=(id,key,val)=>setEntities(es=>es.map(e=>e.id===id?{...e,p:{...e.p,[key]:val}}:e));
+  const setEntityConf=(id,val)=>setEntities(es=>es.map(e=>e.id===id?{...e,conf:val}:e));
+  const renameEntity=(id,name)=>setEntities(es=>es.map(e=>e.id===id?{...e,name}:e));
+  const setEntityCat=(id,cat)=>setEntities(es=>es.map(e=>e.id===id?{...e,cat}:e));
+  const addEntity=()=>{const id='e'+Date.now();setEntities(es=>[...es,{id,name:'New entity',cat:'digital',conf:0.4,p:Object.fromEntries(ALL_GROUNDS.map(g=>[g.key,0.4]))}]);setEditId(id);setSelected(id);};
+  const removeEntity=(id)=>{setEntities(es=>es.filter(e=>e.id!==id));if(selected===id)setSelected(null);if(editId===id){const rest=entities.filter(e=>e.id!==id);if(rest.length)setEditId(rest[0].id);}};
+  const fillCfg=()=>setCfg(JSON.stringify({theory,alpha,entities},null,2));
+  const applyCfg=()=>{try{const o=JSON.parse(cfg);if(o.theory)setTheory(o.theory);if(o.alpha)setAlpha(o.alpha);if(Array.isArray(o.entities))setEntities(o.entities);setCfgErr('');}catch(e){setCfgErr('Could not parse the text. Check the JSON and try again.');}};
+  const reset=()=>{setTheory('linear');setAlpha(Object.fromEntries(ALL_GROUNDS.map(g=>[g.key,g.alpha])));setEntities(DEFAULT_ENTITIES);setSelected(null);setEditId('chimera');setCfgErr('');};
+
+  const THEORIES=[
+    {k:'linear',name:'Degree (linear)',desc:'Moral status rises in proportion to grounds (DeGrazia 2008).'},
+    {k:'sigmoid',name:'Degree (sigmoid)',desc:'A logistic variant: slow at the extremes, steep in the middle.'},
+    {k:'threshold',name:'Threshold',desc:'Moral status rises in discrete jumps at thresholds (Buchanan 2009).'},
+    {k:'multicriterial',name:'Multi-criterial',desc:'Breadth across grounds is rewarded; narrow profiles are penalized (Warren 1997).'},
+  ];
