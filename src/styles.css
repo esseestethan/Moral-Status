@@ -1,0 +1,92 @@
+/*
+ * Computer Modern, self-hosted from the OFL-licensed `computer-modern` npm
+ * package so the LaTeX look does not depend on a third-party CDN at runtime.
+ * Family names match the SERIF and MONO stacks in MoralStatusMap.jsx.
+ */
+@font-face {
+  font-family: 'Computer Modern Serif';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-serif-500-roman.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Computer Modern Serif';
+  font-style: italic;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-serif-500-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Computer Modern Serif';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-serif-700-roman.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Computer Modern Serif';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-serif-700-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Computer Modern Typewriter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-typewriter-text-500-roman.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Computer Modern Typewriter';
+  font-style: italic;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-typewriter-text-500-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Computer Modern Typewriter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('computer-modern/fonts/cmu-typewriter-text-700-roman.woff2') format('woff2');
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #fcfbf8;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Form controls do not inherit the page font by default; without this the
+   theory cards and ranking list fall back to the browser's sans-serif. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #3a3a8c;
+  outline-offset: 2px;
+}

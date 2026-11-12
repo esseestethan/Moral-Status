@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 
 /* ============================== math ============================== */
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -40,7 +40,7 @@ const TIERS=[
   {short:'Precautionary',long:'Precautionary concern',lo:0.10,hi:0.30,fill:'#EDF0FB'},
   {short:'Partial',long:'Partial moral status',lo:0.30,hi:0.60,fill:'#E0E5F8'},
   {short:'Full',long:'Full moral status (personhood)',lo:0.60,hi:0.85,fill:'#CAD2F4'},
-  {short:'Supra',long:'Supra moral status: more-than-full moral status(post-persons, ASI)',lo:0.85,hi:1.0001,fill:'#C9B6F0'},
+  {short:'Supra',long:'Supra moral status: more-than-full moral status (post-persons, ASI)',lo:0.85,hi:1.0001,fill:'#C9B6F0'},
 ];
 function tierIndex(y){for(let i=0;i<TIERS.length;i++){if(y>=TIERS[i].lo&&y<TIERS[i].hi)return i;}return TIERS.length-1;}
 
@@ -211,20 +211,75 @@ function Panel({children,style}){
   return <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:6,padding:16,...style}}>{children}</div>;
 }
 
+/* ============================== label placement ============================== */
+// Greedy collision-avoiding placement for the map's entity labels. Each label considers
+// slots to the right and left of its point, shifted vertically and horizontally away
+// from it, and takes the nearest slot that overlaps no placed label, no point, and no
+// fixed caption, and stays inside the plot. Displaced labels get a short leader line.
+const LABEL_CHAR_W=6.1;  // measured advance of 10.5px Computer Modern Typewriter is ~5.5; headroom for bold and fallbacks
+const LABEL_H=12;        // measured line box is 11.4px: 5.4 above the label's anchor, 6.0 below
+const LABEL_UP=5.5,LABEL_DOWN=LABEL_H-LABEL_UP;
+const LABEL_GAP=8;       // default gap between a point and its label
+const boxesOverlap=(a,b)=>a.x0<b.x1&&b.x0<a.x1&&a.y0<b.y1&&b.y0<a.y1;
+// Candidate offsets, cheapest first: stay level and close, prefer the right-hand side.
+const LABEL_CANDIDATES=(()=>{const out=[];
+  for(let i=-12;i<=12;i++)for(const dx of [0,24,48,80,120,170])for(const side of [1,-1])
+    out.push({dy:i*LABEL_H,dx,side,cost:Math.abs(i)*LABEL_H+dx*0.6+(side<0?6:0)});
+  return out.sort((a,b)=>a.cost-b.cost);})();
+
+function placeLabels(points,fixed,bounds,selected){
+  const taken=[...fixed,...points.map(p=>({x0:p.cx-5,y0:p.cy-5,x1:p.cx+5,y1:p.cy+5,owner:p.id}))];
+  const order=[...points].sort((a,b)=>(b.id===selected)-(a.id===selected)||a.cy-b.cy);
+  const placed={};
+  for(const p of order){
+    const w=p.name.length*LABEL_CHAR_W*(p.id===selected?1.08:1);
+    const slot=({dy,dx,side})=>{
+      const ax=p.cx+side*(LABEL_GAP+dx),x0=side>0?ax:ax-w,y=p.cy+dy;
+      const box={x0,y0:y-LABEL_UP,x1:x0+w,y1:y+LABEL_DOWN};
+      if(box.x0<bounds.x0||box.x1>bounds.x1||box.y0<bounds.y0||box.y1>bounds.y1)return null;
+      return {ax,y,side,moved:dy!==0||dx!==0,box};
+    };
+    let best=null;
+    for(const cand of LABEL_CANDIDATES){
+      const s=slot(cand);
+      if(s&&!taken.some(b=>b.owner!==p.id&&boxesOverlap(b,s.box))){best=s;break;}
+    }
+    // Nowhere free (only with a very crowded custom map): fall back to the default spot.
+    if(!best)best=slot({dy:0,dx:0,side:1})||slot({dy:0,dx:0,side:-1})||{ax:p.cx+LABEL_GAP,y:p.cy,side:1,moved:false,box:{x0:p.cx,y0:p.cy,x1:p.cx,y1:p.cy}};
+    taken.push(best.box);
+    placed[p.id]=best;
+  }
+  return placed;
+}
+
+// Entities track the diagonal, so the lower bands are empty on the right and the upper
+// bands are empty on the left. Put each band's caption on its empty side.
+const captionOnRight=(tierIdx)=>tierIdx<=2;
+
 /* ============================== map plot ============================== */
 function MapPlot({entities,statsMap,theory,selected,onSelect,showClouds,showEllipses,showCurve}){
   const VBW=760,VBH=540,L=70,R=26,T=22,B=58;
   const plotW=VBW-L-R,plotH=VBH-T-B;
   const mapX=(x)=>L+x*plotW, mapY=(y)=>T+(1-y)*plotH;
   let curve='';for(let i=0;i<=50;i++){const xx=i/50,yy=ceilingY(xx,theory);curve+=(i===0?'M':'L')+mapX(xx).toFixed(1)+' '+mapY(yy).toFixed(1)+' ';}
-  const selStat=selected?statsMap[selected]:null;
+  const selStat=selected&&statsMap[selected]&&entities.some(e=>e.id===selected)?statsMap[selected]:null;
   const selCol=selStat?CAT_COLORS[entities.find(e=>e.id===selected).cat]:C.accent;
+
+  // Fixed captions the entity labels must not cover.
+  const fixedBoxes=TIERS.map((t,ti)=>{const ym=(mapY(Math.min(t.hi,1))+mapY(t.lo))/2,cw=t.long.length*LABEL_CHAR_W+4;
+    return captionOnRight(ti)?{x0:L+plotW-8-cw,y0:ym-6,x1:L+plotW-4,y1:ym+6}:{x0:L+4,y0:ym-6,x1:L+8+cw,y1:ym+6};});
+  fixedBoxes.push({x0:L+plotW-4-20*5.6,y0:mapY(0.85)-14,x1:L+plotW,y1:mapY(0.85)-1});
+  if(showCurve){const cy0=mapY(ceilingY(0.5,theory))-6;fixedBoxes.push({x0:mapX(0.5)-68,y0:cy0-9.5,x1:mapX(0.5)+68,y1:cy0+3});}
+  if(selStat)fixedBoxes.push({x0:L+plotW-4-9*5.4,y0:mapY(selStat.yHi)-13,x1:L+plotW,y1:mapY(selStat.yHi)-1});
+  const points=entities.map(e=>({id:e.id,name:e.name,cx:mapX(statsMap[e.id].x),cy:mapY(statsMap[e.id].y)}));
+  const labelPos=placeLabels(points,fixedBoxes,{x0:L+2,y0:T+2,x1:VBW-2,y1:T+plotH-2},selected);
+
   return (
-    <svg viewBox={`0 0 ${VBW} ${VBH}`} style={{width:'100%',height:'auto',display:'block',userSelect:'none'}}>
-      {TIERS.map((t)=>{const y0=mapY(Math.min(t.hi,1)),y1=mapY(t.lo);return(
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} style={{width:'100%',height:'auto',display:'block',userSelect:'none'}} role="img" aria-label="Map of candidate entities by moral status grounds and degree of moral status">
+      {TIERS.map((t,ti)=>{const y0=mapY(Math.min(t.hi,1)),y1=mapY(t.lo);const onRight=captionOnRight(ti);return(
         <g key={t.short}>
           <rect x={L} y={y0} width={plotW} height={y1-y0} fill={t.fill}/>
-          <text x={L+8} y={(y0+y1)/2+3} fontFamily={MONO} fontSize={10.5} fill={C.muted} opacity={0.85}>{t.long}</text>
+          <text x={onRight?L+plotW-8:L+8} y={(y0+y1)/2+3} textAnchor={onRight?'end':'start'} fontFamily={MONO} fontSize={10.5} fill={C.muted} opacity={0.85}>{t.long}</text>
         </g>);})}
       {[0,0.25,0.5,0.75,1].map(gx=>(
         <line key={'gx'+gx} x1={mapX(gx)} y1={T} x2={mapX(gx)} y2={T+plotH} stroke={C.borderSoft} strokeWidth={1}/>
@@ -258,11 +313,18 @@ function MapPlot({entities,statsMap,theory,selected,onSelect,showClouds,showElli
           fill={col} fillOpacity={sel?0.16:0.07} stroke={col} strokeOpacity={dim?0.3:(sel?0.95:0.55)} strokeWidth={sel?1.8:0.9}/>);
       })}
       {entities.map(e=>{const st=statsMap[e.id];const col=CAT_COLORS[e.cat];const sel=selected===e.id;const dim=selected&&!sel;
-        const cx=mapX(st.x),cy=mapY(st.y);const right=st.x<0.84;
+        const cx=mapX(st.x),cy=mapY(st.y);
         return(<g key={'p'+e.id} opacity={dim?0.4:1} style={{cursor:'pointer'}} onClick={()=>onSelect(sel?null:e.id)}>
+          <title>{e.name}</title>
           {sel&&<circle cx={cx} cy={cy} r={9} fill="none" stroke={col} strokeWidth={1.2} opacity={0.5}/>}
           <circle cx={cx} cy={cy} r={sel?6:4.5} fill={col} stroke="#fff" strokeWidth={1.4}/>
-          <text x={right?cx+8:cx-8} y={cy+3.5} textAnchor={right?'start':'end'} fontFamily={MONO} fontSize={10.5} fill={C.ink} fontWeight={sel?700:400}>{e.name}</text>
+        </g>);})}
+      {entities.map(e=>{const lp=labelPos[e.id];const col=CAT_COLORS[e.cat];const sel=selected===e.id;const dim=selected&&!sel;
+        const cx=mapX(statsMap[e.id].x),cy=mapY(statsMap[e.id].y);
+        return(<g key={'l'+e.id} opacity={dim?0.4:1} style={{cursor:'pointer'}} onClick={()=>onSelect(sel?null:e.id)}>
+          {lp.moved&&<line x1={cx+lp.side*4} y1={cy} x2={lp.ax-lp.side*1.5} y2={lp.y} stroke={col} strokeWidth={0.8} opacity={0.6}/>}
+          <text x={lp.ax} y={lp.y+3.5} textAnchor={lp.side>0?'start':'end'} fontFamily={MONO} fontSize={10.5} fill={C.ink} fontWeight={sel?700:400}
+            stroke={C.bg} strokeWidth={3} strokeOpacity={0.85} strokeLinejoin="round" paintOrder="stroke">{e.name}</text>
         </g>);})}
       {[0,0.25,0.5,0.75,1].map(gx=>(<text key={'tx'+gx} x={mapX(gx)} y={T+plotH+16} textAnchor="middle" fontFamily={MONO} fontSize={9.5} fill={C.muted}>{gx.toFixed(2)}</text>))}
       {isThreshold(theory)&&<text x={L+plotW} y={T+plotH+31} textAnchor="end" fontFamily={MONO} fontSize={9} fontStyle="italic" fill={C.muted}>threshold view: vertical position marks tier membership, not amount of status</text>}
@@ -319,8 +381,6 @@ function obligationsFor(stat,precaution){
 
 /* ============================== main ============================== */
 export default function MoralStatusMap(){
-  useEffect(()=>{const l=document.createElement('link');l.rel='stylesheet';l.href='https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css';document.head.appendChild(l);return()=>{try{document.head.removeChild(l);}catch(e){}};},[]);
-
   const [theory,setTheory]=useState('linear');
   const [alpha,setAlpha]=useState(Object.fromEntries(ALL_GROUNDS.map(g=>[g.key,g.alpha])));
   const [entities,setEntities]=useState(DEFAULT_ENTITIES);
@@ -368,7 +428,7 @@ export default function MoralStatusMap(){
   const chip=(col)=>({fontFamily:MONO,fontSize:11,padding:'2px 8px',borderRadius:3,background:col+'18',color:col,border:`1px solid ${col}44`});
 
   return(
-    <div style={{fontFamily:SERIF,color:C.ink,background:C.bg,padding:'22px 20px 30px',minHeight:'100%'}}>
+    <div style={{fontFamily:SERIF,color:C.ink,background:C.bg,padding:'22px 16px 30px',minHeight:'100vh'}}>
       <div style={{maxWidth:1280,margin:'0 auto'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:16,flexWrap:'wrap',marginBottom:6}}>
           <div>
@@ -395,10 +455,11 @@ export default function MoralStatusMap(){
         </Panel>}
 
         <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr)',gap:14,marginTop:14}} className="msm-grid">
-          <style>{`@media(min-width:1060px){.msm-grid{grid-template-columns:302px minmax(0,1fr) 322px !important;}}`}</style>
+          <style>{`@media(min-width:1060px){.msm-grid{grid-template-columns:302px minmax(0,1fr) 322px !important;}}
+            @media(max-width:1059px){.msm-center{order:-2}.msm-right{order:-1}}`}</style>
 
           {/* LEFT */}
-          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div className="msm-left" style={{display:'flex',flexDirection:'column',gap:14,minWidth:0}}>
             <Panel>
               <Eyebrow>Meta-theory of moral status</Eyebrow>
               <div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -451,7 +512,7 @@ export default function MoralStatusMap(){
           </div>
 
           {/* CENTER */}
-          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div className="msm-center" style={{display:'flex',flexDirection:'column',gap:12,minWidth:0}}>
             <Panel style={{padding:14}}>
               {view==='map'
                 ? <MapPlot entities={visEntities} statsMap={statsMap} theory={theory} selected={selected} onSelect={setSelected} showClouds={showClouds} showEllipses={showEllipses} showCurve={showCurve}/>
@@ -500,7 +561,7 @@ export default function MoralStatusMap(){
           </div>
 
           {/* RIGHT */}
-          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div className="msm-right" style={{display:'flex',flexDirection:'column',gap:14,minWidth:0}}>
             <Panel>
               {!selEntity ? (
                 <div>
