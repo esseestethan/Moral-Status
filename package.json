@@ -4,9 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "assemble": "node scripts/assemble.mjs",
-    "dev": "npm run assemble && vite",
-    "build": "npm run assemble && vite build",
+    "dev": "vite",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -14,6 +13,5 @@
     "vite": "6.0.7",
     "react": "18.3.1",
     "react-dom": "18.3.1"
-  },
-  "devDependencies": {}
+  }
 }

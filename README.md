@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-The source is stored in ordered files under `src/chunks/`. The build script joins them into `src/main.jsx` before running Vite.
+The app lives in `src/MoralStatusMap.jsx`; `src/main.jsx` mounts it.
 
 ## Deployment
 
